@@ -6,7 +6,7 @@ An MCP (Model Context Protocol) server that exposes the [BitOasis](https://bitoa
 
 ### Prerequisites
 
-- A verified BitOasis account with an API token (generate one at **Settings > [API Token Management](https://bitoasis.net/en/settings/tokens)**)
+- A verified BitOasis account with an API token (generate one at **Settings > Security > [Token Management](https://bitoasis.net/en/settings/security/tokens)**)
 
 ### Install via uvx (recommended)
 
@@ -27,6 +27,23 @@ Add to your MCP client config (Claude Desktop, VS Code, Cursor, etc.):
 ```
 
 That's it — restart your MCP client and you're ready to go.
+
+### Remote server (no install needed)
+
+If your team hosts the BitOasis MCP server, just add the URL — nothing to install:
+
+```json
+{
+  "mcpServers": {
+    "bitoasis": {
+      "url": "https://mcp.bitoasis.net/sse",
+      "headers": {
+        "Authorization": "Bearer your-api-token-here"
+      }
+    }
+  }
+}
+```
 
 ### Install via Docker
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import Context, FastMCP
 
 from bitoasis_mcp.client import BitOasisClient
 
@@ -18,15 +18,25 @@ mcp = FastMCP(
         "Trading pairs use the format CRYPTO-FIAT (e.g. BTC-AED, ETH-AED, SOL-AED). "
         "Currency symbols are uppercase (BTC, ETH, AED, etc.)."
     ),
+    host=os.environ.get("BITOASIS_HOST", "127.0.0.1"),
+    port=int(os.environ.get("BITOASIS_PORT", "8000")),
 )
 
 
-def _get_client() -> BitOasisClient:
-    api_key = os.environ.get("BITOASIS_API_KEY", "")
+def _get_client(ctx: Context | None = None) -> BitOasisClient:
+    api_key = None
+    # Try request headers first (hosted/HTTP mode)
+    if ctx and ctx.request_context and ctx.request_context.request:
+        auth = ctx.request_context.request.headers.get("authorization", "")
+        if auth.startswith("Bearer "):
+            api_key = auth[7:]
+    # Fall back to env var (local/stdio mode)
+    if not api_key:
+        api_key = os.environ.get("BITOASIS_API_KEY", "")
     if not api_key:
         raise ValueError(
-            "BITOASIS_API_KEY environment variable is not set. "
-            "Add it to your MCP server config under env."
+            "No API key provided. "
+            "Pass via Authorization header or BITOASIS_API_KEY env var."
         )
     return BitOasisClient(api_key)
 
@@ -39,13 +49,13 @@ def _fmt(data: dict) -> str:
 
 
 @mcp.tool()
-async def get_markets() -> str:
+async def get_markets(ctx: Context) -> str:
     """List all available tokens and trading pairs on BitOasis.
 
     Returns each token's symbol, name, and whether trading/deposits/withdrawals
     are enabled, along with available trading pairs.
     """
-    client = _get_client()
+    client = _get_client(ctx)
     try:
         return _fmt(await client.get_markets())
     finally:
@@ -53,13 +63,13 @@ async def get_markets() -> str:
 
 
 @mcp.tool()
-async def get_ticker(pair: str) -> str:
+async def get_ticker(pair: str, ctx: Context) -> str:
     """Get current price/ticker information for a trading pair.
 
     Args:
         pair: Trading pair, e.g. "BTC-AED", "ETH-AED", "SOL-AED".
     """
-    client = _get_client()
+    client = _get_client(ctx)
     try:
         return _fmt(await client.get_ticker(pair))
     finally:
@@ -69,6 +79,7 @@ async def get_ticker(pair: str) -> str:
 @mcp.tool()
 async def get_order_book(
     pair: str,
+    ctx: Context,
     bids_limit: int | None = None,
     asks_limit: int | None = None,
 ) -> str:
@@ -79,7 +90,7 @@ async def get_order_book(
         bids_limit: Max number of bid entries to return.
         asks_limit: Max number of ask entries to return.
     """
-    client = _get_client()
+    client = _get_client(ctx)
     try:
         return _fmt(
             await client.get_order_book(
@@ -93,6 +104,7 @@ async def get_order_book(
 @mcp.tool()
 async def get_trades(
     pair: str,
+    ctx: Context,
     limit: int | None = None,
     from_date: str | None = None,
 ) -> str:
@@ -103,7 +115,7 @@ async def get_trades(
         limit: Max number of trades to return.
         from_date: Only return trades from this date onward (YYYY-MM-DD).
     """
-    client = _get_client()
+    client = _get_client(ctx)
     try:
         return _fmt(await client.get_trades(pair, limit=limit, from_date=from_date))
     finally:
@@ -114,12 +126,12 @@ async def get_trades(
 
 
 @mcp.tool()
-async def get_balances() -> str:
+async def get_balances(ctx: Context) -> str:
     """Get the user's account balances across all currencies.
 
     Returns a mapping of currency symbol to balance amount.
     """
-    client = _get_client()
+    client = _get_client(ctx)
     try:
         return _fmt(await client.get_balances())
     finally:
@@ -127,9 +139,9 @@ async def get_balances() -> str:
 
 
 @mcp.tool()
-async def get_banks() -> str:
+async def get_banks(ctx: Context) -> str:
     """Get the list of bank accounts the user has registered on BitOasis."""
-    client = _get_client()
+    client = _get_client(ctx)
     try:
         return _fmt(await client.get_banks())
     finally:
@@ -142,6 +154,7 @@ async def get_banks() -> str:
 @mcp.tool()
 async def get_orders(
     pair: str,
+    ctx: Context,
     status: str | None = None,
     offset: int | None = None,
     limit: int | None = None,
@@ -156,7 +169,7 @@ async def get_orders(
         limit: Max results (up to 1000).
         from_date: Only return orders from this date (YYYY-MM-DD).
     """
-    client = _get_client()
+    client = _get_client(ctx)
     try:
         return _fmt(
             await client.get_orders(
@@ -168,13 +181,13 @@ async def get_orders(
 
 
 @mcp.tool()
-async def get_order(order_id: int) -> str:
+async def get_order(order_id: int, ctx: Context) -> str:
     """Get details of a specific order by ID.
 
     Args:
         order_id: The order ID.
     """
-    client = _get_client()
+    client = _get_client(ctx)
     try:
         return _fmt(await client.get_order(order_id))
     finally:
@@ -187,6 +200,7 @@ async def place_order(
     side: str,
     order_type: str,
     amount: str,
+    ctx: Context,
     price: str | None = None,
     stop_price: str | None = None,
     test: bool = False,
@@ -202,7 +216,7 @@ async def place_order(
         stop_price: Stop price (required for "stop" and "stop_limit" orders).
         test: If true, validates the order without placing it.
     """
-    client = _get_client()
+    client = _get_client(ctx)
     try:
         return _fmt(
             await client.place_order(
@@ -220,13 +234,13 @@ async def place_order(
 
 
 @mcp.tool()
-async def cancel_order(order_id: int) -> str:
+async def cancel_order(order_id: int, ctx: Context) -> str:
     """Cancel an open order.
 
     Args:
         order_id: The ID of the order to cancel.
     """
-    client = _get_client()
+    client = _get_client(ctx)
     try:
         return _fmt(await client.cancel_order(order_id))
     finally:
@@ -239,6 +253,7 @@ async def cancel_order(order_id: int) -> str:
 @mcp.tool()
 async def get_coin_deposits(
     currency: str,
+    ctx: Context,
     offset: int | None = None,
     limit: int | None = None,
     from_date: str | None = None,
@@ -251,7 +266,7 @@ async def get_coin_deposits(
         limit: Max results (up to 1000).
         from_date: Only return deposits from this date (YYYY-MM-DD).
     """
-    client = _get_client()
+    client = _get_client(ctx)
     try:
         return _fmt(
             await client.get_coin_deposits(
@@ -263,13 +278,13 @@ async def get_coin_deposits(
 
 
 @mcp.tool()
-async def get_coin_deposit(deposit_id: int) -> str:
+async def get_coin_deposit(deposit_id: int, ctx: Context) -> str:
     """Get details of a specific coin deposit.
 
     Args:
         deposit_id: The deposit ID.
     """
-    client = _get_client()
+    client = _get_client(ctx)
     try:
         return _fmt(await client.get_coin_deposit(deposit_id))
     finally:
@@ -279,6 +294,7 @@ async def get_coin_deposit(deposit_id: int) -> str:
 @mcp.tool()
 async def new_coin_deposit_address(
     currency: str,
+    ctx: Context,
     network: str | None = None,
 ) -> str:
     """Generate a new deposit address for a cryptocurrency.
@@ -287,7 +303,7 @@ async def new_coin_deposit_address(
         currency: Crypto symbol, e.g. "BTC", "ETH".
         network: Network code (e.g. "bitcoin", "erc20", "trc20"). Uses default if omitted.
     """
-    client = _get_client()
+    client = _get_client(ctx)
     try:
         return _fmt(await client.new_coin_deposit_address(currency, network=network))
     finally:
@@ -300,6 +316,7 @@ async def new_coin_deposit_address(
 @mcp.tool()
 async def get_coin_withdrawals(
     currency: str,
+    ctx: Context,
     offset: int | None = None,
     limit: int | None = None,
     from_date: str | None = None,
@@ -312,7 +329,7 @@ async def get_coin_withdrawals(
         limit: Max results (up to 1000).
         from_date: Only return withdrawals from this date (YYYY-MM-DD).
     """
-    client = _get_client()
+    client = _get_client(ctx)
     try:
         return _fmt(
             await client.get_coin_withdrawals(
@@ -324,13 +341,13 @@ async def get_coin_withdrawals(
 
 
 @mcp.tool()
-async def get_coin_withdrawal(withdrawal_id: int) -> str:
+async def get_coin_withdrawal(withdrawal_id: int, ctx: Context) -> str:
     """Get details of a specific coin withdrawal.
 
     Args:
         withdrawal_id: The withdrawal ID.
     """
-    client = _get_client()
+    client = _get_client(ctx)
     try:
         return _fmt(await client.get_coin_withdrawal(withdrawal_id))
     finally:
@@ -342,6 +359,7 @@ async def new_coin_withdrawal(
     currency: str,
     amount: str,
     withdrawal_address: str,
+    ctx: Context,
     withdrawal_address_id: str | None = None,
     network: str | None = None,
 ) -> str:
@@ -356,7 +374,7 @@ async def new_coin_withdrawal(
         withdrawal_address_id: Additional address identifier (e.g. XRP tag, XLM memo).
         network: Network code (e.g. "bitcoin", "erc20"). Uses default if omitted.
     """
-    client = _get_client()
+    client = _get_client(ctx)
     try:
         return _fmt(
             await client.new_coin_withdrawal(
@@ -372,9 +390,9 @@ async def new_coin_withdrawal(
 
 
 @mcp.tool()
-async def get_coin_withdrawal_fees() -> str:
+async def get_coin_withdrawal_fees(ctx: Context) -> str:
     """Get withdrawal fees for all supported cryptocurrencies."""
-    client = _get_client()
+    client = _get_client(ctx)
     try:
         return _fmt(await client.get_coin_withdrawal_fees())
     finally:
@@ -386,6 +404,7 @@ async def get_coin_withdrawal_fees() -> str:
 
 @mcp.tool()
 async def get_fiat_deposits(
+    ctx: Context,
     offset: int | None = None,
     limit: int | None = None,
     from_date: str | None = None,
@@ -397,7 +416,7 @@ async def get_fiat_deposits(
         limit: Max results (up to 1000).
         from_date: Only return deposits from this date (YYYY-MM-DD).
     """
-    client = _get_client()
+    client = _get_client(ctx)
     try:
         return _fmt(
             await client.get_fiat_deposits(
@@ -409,13 +428,13 @@ async def get_fiat_deposits(
 
 
 @mcp.tool()
-async def get_fiat_deposit(deposit_id: int) -> str:
+async def get_fiat_deposit(deposit_id: int, ctx: Context) -> str:
     """Get details of a specific fiat deposit.
 
     Args:
         deposit_id: The deposit ID.
     """
-    client = _get_client()
+    client = _get_client(ctx)
     try:
         return _fmt(await client.get_fiat_deposit(deposit_id))
     finally:
@@ -427,6 +446,7 @@ async def get_fiat_deposit(deposit_id: int) -> str:
 
 @mcp.tool()
 async def get_fiat_withdrawals(
+    ctx: Context,
     offset: int | None = None,
     limit: int | None = None,
     from_date: str | None = None,
@@ -438,7 +458,7 @@ async def get_fiat_withdrawals(
         limit: Max results (up to 1000).
         from_date: Only return withdrawals from this date (YYYY-MM-DD).
     """
-    client = _get_client()
+    client = _get_client(ctx)
     try:
         return _fmt(
             await client.get_fiat_withdrawals(
@@ -450,13 +470,13 @@ async def get_fiat_withdrawals(
 
 
 @mcp.tool()
-async def get_fiat_withdrawal(withdrawal_id: int) -> str:
+async def get_fiat_withdrawal(withdrawal_id: int, ctx: Context) -> str:
     """Get details of a specific fiat withdrawal.
 
     Args:
         withdrawal_id: The withdrawal ID.
     """
-    client = _get_client()
+    client = _get_client(ctx)
     try:
         return _fmt(await client.get_fiat_withdrawal(withdrawal_id))
     finally:
@@ -466,6 +486,7 @@ async def get_fiat_withdrawal(withdrawal_id: int) -> str:
 @mcp.tool()
 async def new_fiat_withdrawal(
     amount: str,
+    ctx: Context,
     currency: str = "AED",
     origin: str | None = None,
 ) -> str:
@@ -476,7 +497,7 @@ async def new_fiat_withdrawal(
         currency: Fiat currency (default: "AED").
         origin: Origin identifier.
     """
-    client = _get_client()
+    client = _get_client(ctx)
     try:
         return _fmt(
             await client.new_fiat_withdrawal(
@@ -488,13 +509,13 @@ async def new_fiat_withdrawal(
 
 
 @mcp.tool()
-async def cancel_fiat_withdrawal(withdrawal_id: int) -> str:
+async def cancel_fiat_withdrawal(withdrawal_id: int, ctx: Context) -> str:
     """Cancel a pending fiat withdrawal.
 
     Args:
         withdrawal_id: The withdrawal ID to cancel.
     """
-    client = _get_client()
+    client = _get_client(ctx)
     try:
         return _fmt(await client.cancel_fiat_withdrawal(withdrawal_id))
     finally:
@@ -502,7 +523,8 @@ async def cancel_fiat_withdrawal(withdrawal_id: int) -> str:
 
 
 def main() -> None:
-    mcp.run()
+    transport = os.environ.get("BITOASIS_TRANSPORT", "stdio")
+    mcp.run(transport=transport)
 
 
 if __name__ == "__main__":

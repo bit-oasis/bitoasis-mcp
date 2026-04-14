@@ -9,5 +9,9 @@ COPY src/ src/
 RUN uv sync --frozen --no-dev --no-editable
 
 ENV PATH="/app/.venv/bin:$PATH"
+ENV BITOASIS_TRANSPORT=sse
+ENV BITOASIS_HOST=0.0.0.0
+
+EXPOSE 8000
 
 ENTRYPOINT ["bitoasis-mcp"]
